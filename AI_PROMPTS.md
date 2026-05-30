@@ -36,3 +36,20 @@
 - 验证通过：两个 Go 模块编译成功，`kubectl kustomize` 渲染正常
 
 **人工审查**: （scaffold review 后补充）
+
+---
+
+## 阶段三：端到端链路打通
+
+**目标**: 实现最小可用的完整链路 — 用户在浏览器对话界面输入自然语言，Backend 调用 Claude API 做 tool calling，通过 MCP Server 查询 K8s 集群，将结果流式返回前端展示。
+
+**使用方式**: 以 spec.md 为实现合约，要求 Claude 按照 MCP Server → Backend → Frontend 的顺序实现三个组件。MCP Server 使用 mcp-go 库实现 Streamable HTTP transport，仅实现 `list_pods` 一个 tool；Backend 使用 Claude Messages API 的原生 HTTP 流式调用 + mcp-go client 转发 tool call；Frontend 使用 React + react-markdown 实现对话 UI，通过 SSE 流式接收响应。开发过程中遇到 mcp-go v0.54.1 的 API 变更（`InitializeParams` / `CallToolParams` 等类型名变化），通过阅读源码修复。
+
+**AI 产出**:
+- `mcp-server/main.go`: 完整 MCP Server 实现 — K8s client 初始化（支持 in-cluster 和 kubeconfig 回退）、`list_pods` tool 注册与处理（含 namespace/status 过滤、pod 状态解析、容器 ready/restart 统计）、Streamable HTTP transport 启动
+- `backend/main.go`: 完整编排层实现 — MCP client 初始化与 tool 发现、MCP tools → Claude tool 格式转换、`POST /api/chat` 处理（Claude 流式调用 + SSE 事件解析 + tool_use 循环 + MCP tool 转发 + SSE 流式输出）、CORS 支持
+- `frontend/src/App.tsx` + `App.css`: 对话式 UI — 暗色主题、SSE 流式消息渲染、tool call 可视化、Markdown 渲染（表格/代码块）、空状态引导
+- `frontend/vite.config.ts`: 开发环境 `/api` 反向代理配置
+- 三个组件均编译/构建通过（Go build + TypeScript + Vite production build）
+
+**人工审查**: （e2e verification 后补充）
