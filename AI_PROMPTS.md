@@ -51,5 +51,6 @@
 - `frontend/src/App.tsx` + `App.css`: 对话式 UI — 暗色主题、SSE 流式消息渲染、tool call 可视化、Markdown 渲染（表格/代码块）、空状态引导
 - `frontend/vite.config.ts`: 开发环境 `/api` 反向代理配置
 - 三个组件均编译/构建通过（Go build + TypeScript + Vite production build）
+- 本地验证通过：在 ACP 集群中创建 3 个测试 Pod（Running / CrashLoopBackOff / Pending），通过 `POST /api/chat` 发送"帮我看看 kubeassist-test 命名空间里有没有异常的 pod"，Claude 正确调用 `list_pods` 并生成包含表格、状态标记和排查建议的 Markdown 分析报告，完整 SSE 事件流（145 message + 1 tool_call + 1 tool_result + 1 done）
 
 **人工审查**: （e2e verification 后补充）

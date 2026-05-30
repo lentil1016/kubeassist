@@ -272,7 +272,6 @@ func streamClaudeResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 		}
 
 		eventType, _ := event["type"].(string)
-
 		switch eventType {
 		case "content_block_start":
 			cb, _ := event["content_block"].(map[string]interface{})
