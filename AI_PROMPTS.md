@@ -267,3 +267,35 @@
   - `backend-deployment.yaml` / `backend-service.yaml`: Backend（含 `anthropicBaseUrl` 条件渲染）
   - `frontend-deployment.yaml` / `frontend-service.yaml`: Frontend（Service type 可配）
 - 验证通过：`helm lint` 无错误，`helm template` 渲染正确，`anthropicApiKey` 必填校验生效，`anthropicBaseUrl` 条件渲染正确
+
+---
+
+## 阶段七：GitHub Actions CI
+
+**收到的 Prompt**:
+
+> 现在添加 GitHub Actions CI 流水线。在 .github/workflows/build.yaml 创建 workflow：
+>
+> 触发条件：push to main、pull request to main、手动 workflow_dispatch
+>
+> Job 内容：
+> 1. Go 单元测试 + e2e 测试（go test ./...）
+> 2. 构建三个组件的 Docker 镜像（linux/amd64）
+> 3. 推送到 Docker Hub（docker.io/lentil1016/kubeassist-frontend、-backend、-mcp），tag 用 git sha 短号 + latest
+> 4. docker save 三个镜像为 tar 文件，打包后作为 workflow artifact 上传
+> 5. helm lint 验证 Helm Chart
+>
+> Docker Hub 认证使用 repo secrets：DOCKERHUB_USERNAME 和 DOCKERHUB_TOKEN（已配置好）。
+>
+> 提交：ci: add GitHub Actions build pipeline
+> 在 AI_PROMPTS.md 追加记录。
+
+**目标**: 建立 CI 流水线，实现测试、构建、推送、离线打包的自动化。
+
+**使用方式**: 向 Claude 描述 CI 需求（触发条件、job 划分、镜像 tag 策略、artifact 上传），要求生成单个 workflow 文件。
+
+**AI 产出**:
+- `.github/workflows/build.yaml`: 三个并行/串行 job
+  - `test`: Go 单元测试（mcp-server、backend）+ e2e 测试（test/），使用 `go-version-file` 自动匹配 Go 版本
+  - `build`: 依赖 test 通过后执行，构建三个 Docker 镜像（双 tag: git sha 短号 + latest），push to Docker Hub（PR 时跳过 login 和 push），`docker save | gzip` 打包为 artifact 上传（保留 30 天）
+  - `helm-lint`: 独立 job，验证 Helm Chart

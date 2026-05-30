@@ -1,0 +1,108 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  IMAGE_REPO: docker.io/lentil1016
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: mcp-server/go.mod
+
+      - name: Unit tests (mcp-server)
+        working-directory: mcp-server
+        run: go test -v ./...
+
+      - name: Unit tests (backend)
+        working-directory: backend
+        run: go test -v ./...
+
+      - name: E2E tests
+        working-directory: test
+        run: go test -v ./...
+
+  build:
+    name: Build & Push
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set image tag
+        id: tag
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build MCP Server
+        run: |
+          docker build -t $IMAGE_REPO/kubeassist-mcp:${{ steps.tag.outputs.sha }} \
+                        -t $IMAGE_REPO/kubeassist-mcp:latest \
+                        mcp-server/
+
+      - name: Build Backend
+        run: |
+          docker build -t $IMAGE_REPO/kubeassist-backend:${{ steps.tag.outputs.sha }} \
+                        -t $IMAGE_REPO/kubeassist-backend:latest \
+                        backend/
+
+      - name: Build Frontend
+        run: |
+          docker build -t $IMAGE_REPO/kubeassist-frontend:${{ steps.tag.outputs.sha }} \
+                        -t $IMAGE_REPO/kubeassist-frontend:latest \
+                        frontend/
+
+      - name: Push images
+        if: github.event_name != 'pull_request'
+        run: |
+          docker push $IMAGE_REPO/kubeassist-mcp:${{ steps.tag.outputs.sha }}
+          docker push $IMAGE_REPO/kubeassist-mcp:latest
+          docker push $IMAGE_REPO/kubeassist-backend:${{ steps.tag.outputs.sha }}
+          docker push $IMAGE_REPO/kubeassist-backend:latest
+          docker push $IMAGE_REPO/kubeassist-frontend:${{ steps.tag.outputs.sha }}
+          docker push $IMAGE_REPO/kubeassist-frontend:latest
+
+      - name: Save images for air-gap
+        run: |
+          docker save \
+            $IMAGE_REPO/kubeassist-mcp:${{ steps.tag.outputs.sha }} \
+            $IMAGE_REPO/kubeassist-backend:${{ steps.tag.outputs.sha }} \
+            $IMAGE_REPO/kubeassist-frontend:${{ steps.tag.outputs.sha }} \
+            | gzip > kubeassist-images.tar.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kubeassist-images-${{ steps.tag.outputs.sha }}
+          path: kubeassist-images.tar.gz
+          retention-days: 30
+
+  helm-lint:
+    name: Helm Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - name: Lint chart
+        run: helm lint deploy/helm/kubeassist/ --set anthropicApiKey=lint-test
