@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeassist-backend
+  namespace: kubeassist
+  labels:
+    app: kubeassist-backend
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubeassist-backend
+  template:
+    metadata:
+      labels:
+        app: kubeassist-backend
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: backend
+          image: docker.io/lentil1016/kubeassist-backend:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kubeassist-api-key
+                  key: ANTHROPIC_API_KEY
+            - name: MCP_SERVER_URL
+              value: "http://kubeassist-mcp:3000"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

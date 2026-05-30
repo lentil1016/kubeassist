@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeassist-mcp
+  namespace: kubeassist
+  labels:
+    app: kubeassist-mcp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubeassist-mcp
+  template:
+    metadata:
+      labels:
+        app: kubeassist-mcp
+    spec:
+      serviceAccountName: kubeassist-mcp
+      containers:
+        - name: mcp-server
+          image: docker.io/lentil1016/kubeassist-mcp:latest
+          ports:
+            - containerPort: 3000
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
