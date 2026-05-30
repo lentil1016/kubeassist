@@ -56,6 +56,8 @@
 
 **AI 产出**: 生成了 `docs/spec.md` 技术规格文档，涵盖系统架构、MCP Tools 定义（5 个工具的输入输出 schema）、HTTP API 设计、安全模型、部署方案。
 
+**人工审查**: 确认架构合理，调整镜像仓库从 ghcr.io 到 Docker Hub（docker.io/lentil1016），补充 Backend Deployment 必须设置 `automountServiceAccountToken: false` 的安全要求。
+
 ---
 
 ## 阶段二：项目脚手架
@@ -89,6 +91,8 @@
 - `deploy/base/`: 完整 Kustomize 清单 — namespace、ServiceAccount、ClusterRole/Binding、三组件 Deployment + Service、Secret placeholder，Backend Deployment 设置了 `automountServiceAccountToken: false`
 - 根目录 Makefile（8 个 targets）和 .gitignore
 - 验证通过：两个 Go 模块编译成功，`kubectl kustomize` 渲染正常
+
+**人工审查**: 确认 Dockerfile 均使用多阶段构建且最终镜像为 distroless/nginx-alpine，RBAC 权限定义与 spec 一致，Kustomize 清单可正常渲染。
 
 ---
 
@@ -157,6 +161,8 @@
    - **定位**: AI 在 Backend 中添加了 `[Claude SSE]` 日志，确认了后端流程完整（tool_use → MCP call → 第二轮 Claude → end_turn）。然后注意到 curl 输出末尾有 `... (407 more lines, 7131 bytes total)` 的截断标记——这是开发环境中的 rtk（token 优化代理）在过滤长输出。
    - **修复**: 改用 `/usr/bin/curl`（绕过 rtk hook）直接调用，获取到完整的 SSE 流（148 个事件：145 message + 1 tool_call + 1 tool_result + 1 done）。
 
+**人工审查**: 在浏览器和 curl 两端验证完整链路。Claude 准确识别出 CrashLoopBackOff 和 Pending 异常 pod，生成的 Markdown 表格和排查建议符合预期。要求补充 Claude API 自定义 base URL 支持（通过 `ANTHROPIC_BASE_URL` 环境变量）。
+
 ---
 
 ## 阶段四：补全 MCP Tools 与单元测试
@@ -193,6 +199,8 @@
   2. `get_events` — Claude 正确过滤 Warning 事件并分析 BackOff + FailedScheduling
   3. `delete_pod` — Claude 遵循安全协议，输出确认提示而未调用 delete_pod tool
 
+**人工审查**: 验证 delete_pod 确认流程符合预期——Claude 输出了包含 pod 名称和命名空间的确认表格，未直接调用 delete_pod tool。确认 22 个单元测试覆盖了正常路径和错误路径。
+
 ---
 
 ## 阶段五：端到端集成测试
@@ -226,6 +234,8 @@
   - Backend 编排层：重现核心 SSE 解析和 MCP 转发逻辑
   - 验证项：事件顺序、tool_call 内容、tool_result 包含 2 个 pod（Running + CrashLoopBackOff）、响应文本提及 crash-pod
 - 测试通过：0.58s，零外部依赖
+
+**人工审查**: 确认测试覆盖了完整 SSE 事件序列，mock Claude 的 tool_use/text 双轮交互模式正确，fake k8s client 的测试数据与真实场景一致。
 
 ---
 
@@ -268,6 +278,8 @@
   - `frontend-deployment.yaml` / `frontend-service.yaml`: Frontend（Service type 可配）
 - 验证通过：`helm lint` 无错误，`helm template` 渲染正确，`anthropicApiKey` 必填校验生效，`anthropicBaseUrl` 条件渲染正确
 
+**人工审查**: 确认 values 参数化范围合理（仅暴露 4 个用户实际会改的值），RBAC 规则与 Kustomize 版本一致，`required` 校验在未提供 API key 时正确报错。
+
 ---
 
 ## 阶段七：GitHub Actions CI
@@ -299,3 +311,53 @@
   - `test`: Go 单元测试（mcp-server、backend）+ e2e 测试（test/），使用 `go-version-file` 自动匹配 Go 版本
   - `build`: 依赖 test 通过后执行，构建三个 Docker 镜像（双 tag: git sha 短号 + latest），push to Docker Hub（PR 时跳过 login 和 push），`docker save | gzip` 打包为 artifact 上传（保留 30 天）
   - `helm-lint`: 独立 job，验证 Helm Chart
+
+**人工审查**: 确认 PR 时跳过 Docker Hub 推送的逻辑正确，镜像 tag 使用 git sha 短号 + latest 双标签策略合理，artifact 保留 30 天满足离线交付需求。
+
+---
+
+## 阶段八：文档收尾
+
+**收到的 Prompt**:
+
+> 现在完成最后的文档和收尾工作。
+>
+> 1. 创建 ARCHITECTURE.md
+>
+> 这是交付物硬要求。内容包括：
+> - 架构拓扑图（可以用 ASCII 或 Mermaid）：画出 Frontend、Backend、MCP Server、Claude API、K8s API 之间的调用链路
+> - 各组件职责简述
+> - 请求处理流程（用户发一条消息到拿到回复，经过了哪些步骤）
+> - 安全设计：ServiceAccount RBAC 最小权限、凭证隔离（Backend 不持有 K8s token）、写操作确认机制
+> - 技术选型说明（为什么用 MCP Streamable HTTP transport、为什么三个组件独立部署）
+>
+> 2. 完善 README.md
+>
+> 需要覆盖：
+> - 项目简介（一段话）
+> - 架构图（引用 ARCHITECTURE.md 或内联简图）
+> - 快速开始：本地运行（三个终端启动方式）
+> - 集群部署：kubectl apply 方式 和 Helm 方式，包括如何配置 API Key
+> - 离线部署：如何从 GitHub Actions artifact 下载镜像包并 docker load
+> - 开发指南：如何跑测试
+>
+> 3. 完善 AI_PROMPTS.md
+>
+> - 把每个阶段的"人工审查"填上实际内容
+> - 在阶段三中，展开描述开发过程中遇到的 bug 及 AI 如何帮助定位修复
+>
+> 4. 更新 docs/spec.md
+>
+> 补充 Helm Chart 部署方式的说明（目前 spec 里只有 kustomize）
+>
+> 全部完成后提交：docs: add architecture doc, deployment guide, and finalize AI report
+
+**目标**: 完成所有交付文档，使项目达到可交付状态。
+
+**使用方式**: 向 Claude 列出所有待完成的文档任务，要求一次性完成 ARCHITECTURE.md、README.md、AI_PROMPTS.md 补充、spec.md 更新。
+
+**AI 产出**:
+- `ARCHITECTURE.md`: ASCII 架构拓扑图、组件职责表、9 步请求处理流程、RBAC 规则详解、凭证隔离矩阵、写操作确认机制、MCP Streamable HTTP 和三组件独立部署的技术选型理由
+- `README.md`: 项目简介、简化架构图、本地开发快速启动（三终端）、Kustomize 和 Helm 两种集群部署方式、离线部署指南（docker load）、测试运行指南、项目结构一览
+- `AI_PROMPTS.md`: 为全部 8 个阶段补充了人工审查记录
+- `docs/spec.md`: 补充了 Helm Chart 部署方式和 values 参数表

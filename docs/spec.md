@@ -321,7 +321,7 @@ deploy/
 │       └── clusterrolebinding.yaml
 ```
 
-All manifests are plain Kubernetes YAML organized with Kustomize. No Helm charts.
+All manifests are available in two formats: plain Kubernetes YAML organized with Kustomize, and a Helm chart.
 
 ### Container Images
 
@@ -335,13 +335,29 @@ Images are built via GitHub Actions for `linux/amd64`:
 
 For air-gapped environments, the CI pipeline produces a `docker save` tarball as a release artifact.
 
+### Helm Chart
+
+A Helm chart is provided at `deploy/helm/kubeassist/` with the following configurable values:
+
+| Value | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `anthropicApiKey` | Yes | — | Claude API key |
+| `anthropicBaseUrl` | No | `""` (official API) | Custom Claude API base URL |
+| `image.tag` | No | `latest` | Image tag for all three components |
+| `frontend.service.type` | No | `ClusterIP` | Frontend Service type |
+
+All other configuration (image names, ports, RBAC rules, resource limits) is hardcoded in the templates.
+
 ### Deployment Commands
 
 ```bash
-# Deploy to cluster
+# Option A: Kustomize
 kubectl apply -k deploy/base/
-
-# Set the Anthropic API key
 kubectl -n kubeassist create secret generic kubeassist-api-key \
   --from-literal=ANTHROPIC_API_KEY=<your-key>
+
+# Option B: Helm
+helm install kubeassist deploy/helm/kubeassist/ \
+  --namespace kubeassist --create-namespace \
+  --set anthropicApiKey=<your-key>
 ```
