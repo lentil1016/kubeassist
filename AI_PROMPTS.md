@@ -361,3 +361,71 @@
 - `README.md`: 项目简介、简化架构图、本地开发快速启动（三终端）、Kustomize 和 Helm 两种集群部署方式、离线部署指南（docker load）、测试运行指南、项目结构一览
 - `AI_PROMPTS.md`: 为全部 8 个阶段补充了人工审查记录
 - `docs/spec.md`: 补充了 Helm Chart 部署方式和 values 参数表
+
+---
+
+## 阶段九：CI 验证与集群部署验证
+
+**收到的 Prompt**:
+
+> 最后一步：CI 验证 + 集群部署验证。
+>
+> 1. 推送代码并验证 CI
+>
+> 确保所有 commit 已推送到 GitHub main 分支。推送后等待 GitHub Actions workflow 完成，用 gh run list 和 gh run view 检查结果。如果有失败的 job，修复后重新推送直到 CI 全绿。
+>
+> 2. 集群内部署验证
+>
+> CI 通过、镜像推送到 Docker Hub 后，在本地集群里验证 Helm 部署：
+>
+> helm install kubeassist deploy/helm/kubeassist/ \
+>   --namespace kubeassist --create-namespace \
+>   --set anthropicApiKey=\<从 ../claude.json 读取 key\> \
+>   --set anthropicBaseUrl=\<从 ../claude.json 读取 url\>
+>
+> 然后：
+> - 确认三个 pod 都 Running
+> - 通过 port-forward 前端 service 访问 UI
+> - 在浏览器打开 http://localhost:8888，发送"帮我看看集群有没有异常的 pod"
+> - 验证完整链路在集群内也能工作
+>
+> 如果遇到问题（镜像拉取失败、service 连通性、环境变量等），排查并修复。
+>
+> 3. 清理
+>
+> 验证完成后卸载：helm uninstall kubeassist -n kubeassist
+>
+> 4. 收尾
+>
+> 如果有代码修改，提交并在 AI_PROMPTS.md 追加最后一个阶段的记录。
+
+**目标**: 验证 CI 流水线全绿，并在真实 K8s 集群中完成 Helm 部署和端到端对话验证。
+
+**使用方式**: 推送代码触发 CI，监控 `gh run watch` 直到全绿，修复失败的 job 后重新推送。CI 通过后用 Helm 部署到 ACP 集群，通过 port-forward 验证完整对话链路。
+
+**AI 产出**:
+- 修复 Dockerfile Go 版本不匹配：`golang:1.24` → `golang:1.25`，同时补充 `COPY go.sum`
+- 修复 Frontend `package-lock.json` 缺少 react-markdown 依赖：重新生成 lockfile
+- Helm Chart 新增 `image.registry` 可配参数：支持离线/镜像仓库环境覆盖镜像前缀（默认 `docker.io/lentil1016`）
+- CI 最终全绿：Test（22 unit + 1 e2e）、Build & Push（3 images → Docker Hub）、Helm Lint 全部通过
+- 集群部署验证通过：3 个 Pod 全部 Running，通过 `port-forward svc/kubeassist-frontend 8888:80` 访问前端，发送"帮我看看集群有没有异常的 pod"，Claude 调用 `list_pods` 扫描 256 个 Pod 并生成包含高重启 Pod、ImagePullBackOff、Pending 等异常的详细报告
+- 验证完成后 `helm uninstall` 清理
+
+**遇到的 Bug 与调试过程**:
+
+1. **Dockerfile Go 版本不匹配（CI 构建失败）**
+   - **现象**: CI Build MCP Server 步骤失败，`go mod download` 报 `go.mod requires go >= 1.25.6 (running go 1.24.13)`
+   - **定位**: Dockerfile 使用 `golang:1.24` 基础镜像，但 go.mod 要求 1.25.6+
+   - **修复**: 更新两个 Dockerfile 为 `golang:1.25`，同时修复 `COPY go.mod` 为 `COPY go.mod go.sum`
+
+2. **Frontend package-lock.json 不同步（CI 构建失败）**
+   - **现象**: `npm ci` 报 `Missing: react-markdown@10.1.0 from lock file`
+   - **定位**: react-markdown 是后期 `npm install` 安装的，但 lockfile 未包含其依赖树
+   - **修复**: 删除旧 lockfile 并重新 `npm install` 生成完整版本
+
+3. **离线集群无法拉取 Docker Hub 镜像（部署失败）**
+   - **现象**: 三个 Pod 均 `ImagePullBackOff`
+   - **定位**: ACP 集群无法访问 Docker Hub（与阶段三相同问题）
+   - **修复**: 在 Helm Chart 中新增 `image.registry` 参数，通过 `--set image.registry=<mirror>` 指向内部镜像仓库
+
+**人工审查**: 确认 CI 全绿、集群部署三 Pod Running、端到端对话链路在集群内正常工作，清理完成。

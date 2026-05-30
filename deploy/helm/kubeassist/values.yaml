@@ -9,6 +9,8 @@ anthropicApiKey: ""
 anthropicBaseUrl: ""
 
 image:
+  # Image registry prefix. Override for air-gapped or mirrored environments.
+  registry: docker.io/lentil1016
   # Image tag shared by all three components
   tag: latest
 

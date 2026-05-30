@@ -63,6 +63,7 @@ Optional values:
 |-------|---------|-------------|
 | `anthropicApiKey` | (required) | Claude API key |
 | `anthropicBaseUrl` | `""` (official API) | Custom Claude API base URL |
+| `image.registry` | `docker.io/lentil1016` | Image registry prefix (override for air-gap / mirror) |
 | `image.tag` | `latest` | Image tag for all three components |
 | `frontend.service.type` | `ClusterIP` | Frontend Service type (`NodePort` / `LoadBalancer` for external access) |
 
