@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeassist-frontend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: kubeassist-frontend
+    {{- include "kubeassist.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubeassist-frontend
+  template:
+    metadata:
+      labels:
+        app: kubeassist-frontend
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: frontend
+          image: docker.io/lentil1016/kubeassist-frontend:{{ .Values.image.tag }}
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi

@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: kubeassist-frontend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: kubeassist-frontend
+    {{- include "kubeassist.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.frontend.service.type }}
+  selector:
+    app: kubeassist-frontend
+  ports:
+    - port: 80
+      targetPort: 80
+      protocol: TCP

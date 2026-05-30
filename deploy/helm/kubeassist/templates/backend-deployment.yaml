@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kubeassist-backend
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: kubeassist-backend
+    {{- include "kubeassist.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubeassist-backend
+  template:
+    metadata:
+      labels:
+        app: kubeassist-backend
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: backend
+          image: docker.io/lentil1016/kubeassist-backend:{{ .Values.image.tag }}
+          ports:
+            - containerPort: 8080
+          env:
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: kubeassist-api-key
+                  key: ANTHROPIC_API_KEY
+            {{- if .Values.anthropicBaseUrl }}
+            - name: ANTHROPIC_BASE_URL
+              value: {{ .Values.anthropicBaseUrl | quote }}
+            {{- end }}
+            - name: MCP_SERVER_URL
+              value: "http://kubeassist-mcp:3000"
+          resources:
+            requests:
+              cpu: 100m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
