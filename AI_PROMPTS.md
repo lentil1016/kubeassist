@@ -429,3 +429,54 @@
    - **修复**: 在 Helm Chart 中新增 `image.registry` 参数，通过 `--set image.registry=<mirror>` 指向内部镜像仓库
 
 **人工审查**: 确认 CI 全绿、集群部署三 Pod Running、端到端对话链路在集群内正常工作，清理完成。
+
+---
+
+## 阶段十：会话管理与代码加固
+
+**收到的 Prompt**:
+
+> 当前 Backend 每次请求都是无状态的——不保留对话历史，用户连续对话时，Claude 不记得之前聊了什么。请加一个基于内存的简单会话管理：前端发送请求时带上 conversation_id，Backend 在内存中按 conversation_id 缓存 messages 数组，后续请求追加到同一个会话。不需要持久化，定期清空即可。前端在页面加载时生成一个随机 UUID 作为 conversation_id。
+>
+> 代码 Review 与加固
+>
+> 请自行 review 整个项目的代码质量，重点关注：
+> - Backend 的健壮性（超时、输入校验、错误处理）
+> - K8s 部署清单的生产就绪度（探针、配置灵活性）
+> - 可配置性（是否有不该硬编码的值）
+>
+> 在 AI_PROMPTS.md 追加记录，并检查各个阶段是否有什么"适合展示"的"问题排查"过程没有补充到文档中
+
+**目标**: 实现多轮对话能力，并对全项目进行代码审查和生产就绪性加固。
+
+**使用方式**: 提出会话管理的功能需求，并要求 AI 自主审查整个项目的代码质量和部署配置，发现问题后自行修复。
+
+**代码审查发现与修复**:
+
+1. **会话管理（新增功能）**
+   - Frontend: 页面加载时 `useMemo(() => crypto.randomUUID(), [])` 生成 conversation_id，每次请求携带
+   - Backend: `sync.Map` 按 conversation_id 存储 messages 数组，`session.mu` 互斥锁保护并发读写，后台 goroutine 每 5 分钟清理超过 30 分钟未活跃的会话
+
+2. **Backend 健壮性加固**
+   - `http.DefaultClient` → 自定义 `http.Client{Timeout: 5 * time.Minute}`（防止 Claude API 调用无限挂起）
+   - `http.ListenAndServe` → `http.Server{ReadTimeout: 10s, WriteTimeout: 5min, IdleTimeout: 60s}`
+   - 请求 body 读取增加 `io.LimitReader(r.Body, 64KB)`（防止超大 payload 耗尽内存）
+   - 空 message 校验：`strings.TrimSpace(req.Message) == ""` 返回 400
+   - Claude 错误响应 body 也用 `io.LimitReader` 限制为 4KB
+   - tool_use 循环加上 `maxToolRounds = 10` 上限（防止无限循环）
+   - 新增 `GET /healthz` 健康检查端点
+
+3. **MCP Server 加固**
+   - 新增 `:3001/healthz` 健康检查端点（独立端口，不干扰 MCP Streamable HTTP 协议）
+
+4. **K8s 部署清单生产就绪性**
+   - 全部 6 个 Deployment（Kustomize + Helm 各 3 个）添加 `livenessProbe` 和 `readinessProbe`
+   - Backend/MCP: HTTP GET `/healthz`，Frontend: HTTP GET `/`
+
+**AI 产出**:
+- `backend/main.go`: 会话管理（sync.Map + TTL 清理）、HTTP 超时配置、输入校验、healthz 端点、tool_use 循环上限
+- `frontend/src/App.tsx`: conversation_id 生成与发送
+- `mcp-server/main.go`: healthz 端点（:3001）
+- `deploy/helm/kubeassist/templates/*.yaml`: 三个 Deployment 添加 liveness/readiness probes
+- `deploy/base/*/deployment.yaml`: Kustomize 清单同步添加 probes
+- 全部测试通过（22 unit + 1 e2e），helm lint 通过

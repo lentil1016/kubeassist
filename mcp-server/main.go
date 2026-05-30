@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net/http"
 	"path/filepath"
 
 	"github.com/mark3labs/mcp-go/mcp"
@@ -69,6 +70,16 @@ func main() {
 
 	s := server.NewMCPServer("kubeassist-mcp", "0.1.0")
 	registerTools(s, client)
+
+	// Health endpoint on a separate port for K8s probes
+	go func() {
+		mux := http.NewServeMux()
+		mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte("ok"))
+		})
+		log.Fatal(http.ListenAndServe(":3001", mux))
+	}()
 
 	httpServer := server.NewStreamableHTTPServer(s)
 	log.Println("MCP Server listening on :3000")

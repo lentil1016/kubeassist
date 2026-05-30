@@ -11,6 +11,8 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
+	"time"
 
 	mcpclient "github.com/mark3labs/mcp-go/client"
 	"github.com/mark3labs/mcp-go/mcp"
@@ -23,7 +25,58 @@ var (
 	mcpTools      []mcp.Tool
 	claudeTools   []map[string]interface{}
 	anthropicBase string
+	httpClient    *http.Client
 )
+
+const (
+	maxRequestBody = 64 * 1024 // 64 KB
+	maxToolRounds  = 10        // prevent infinite tool_use loops
+	sessionTTL     = 30 * time.Minute
+	cleanupTick    = 5 * time.Minute
+)
+
+// ---------------------------------------------------------------------------
+// Session store
+// ---------------------------------------------------------------------------
+
+type session struct {
+	messages []claudeMessage
+	lastUsed time.Time
+	mu       sync.Mutex
+}
+
+var sessions sync.Map // map[string]*session
+
+func getOrCreateSession(id string) *session {
+	if s, ok := sessions.Load(id); ok {
+		return s.(*session)
+	}
+	s := &session{lastUsed: time.Now()}
+	actual, _ := sessions.LoadOrStore(id, s)
+	return actual.(*session)
+}
+
+func startSessionCleaner() {
+	go func() {
+		for range time.Tick(cleanupTick) {
+			now := time.Now()
+			sessions.Range(func(key, value interface{}) bool {
+				s := value.(*session)
+				s.mu.Lock()
+				idle := now.Sub(s.lastUsed) > sessionTTL
+				s.mu.Unlock()
+				if idle {
+					sessions.Delete(key)
+				}
+				return true
+			})
+		}
+	}()
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
 func main() {
 	anthropicKey = os.Getenv("ANTHROPIC_API_KEY")
@@ -41,16 +94,32 @@ func main() {
 		anthropicBase = "https://api.anthropic.com"
 	}
 
+	httpClient = &http.Client{Timeout: 5 * time.Minute}
+
 	if err := initMCPClient(); err != nil {
 		log.Fatalf("Failed to initialize MCP client: %v", err)
 	}
 	defer mcpClient.Close()
 
+	startSessionCleaner()
+
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/chat", handleChat)
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+
+	srv := &http.Server{
+		Addr:         ":8080",
+		Handler:      withCORS(mux),
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 5 * time.Minute, // SSE streams can be long
+		IdleTimeout:  60 * time.Second,
+	}
 
 	log.Println("Backend API listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", withCORS(mux)))
+	log.Fatal(srv.ListenAndServe())
 }
 
 func withCORS(handler http.Handler) http.Handler {
@@ -183,10 +252,15 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Message string `json:"message"`
+		Message        string `json:"message"`
+		ConversationID string `json:"conversation_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.NewDecoder(io.LimitReader(r.Body, maxRequestBody)).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+	if strings.TrimSpace(req.Message) == "" {
+		http.Error(w, "message is required", http.StatusBadRequest)
 		return
 	}
 
@@ -199,14 +273,22 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	messages := []claudeMessage{
-		{Role: "user", Content: req.Message},
+	// Session management: load or create conversation
+	var messages []claudeMessage
+	var sess *session
+	if req.ConversationID != "" {
+		sess = getOrCreateSession(req.ConversationID)
+		sess.mu.Lock()
+		sess.lastUsed = time.Now()
+		messages = append(messages, sess.messages...)
+		sess.mu.Unlock()
 	}
+	messages = append(messages, claudeMessage{Role: "user", Content: req.Message})
 
 	ctx := r.Context()
 
-	// Tool-use loop: Claude may request multiple rounds of tool calls
-	for {
+	// Tool-use loop with round limit
+	for round := 0; round < maxToolRounds; round++ {
 		stopReason, updatedMessages, err := streamClaudeResponse(ctx, w, flusher, messages)
 		if err != nil {
 			sendSSEJSON(w, flusher, "error", map[string]string{"error": err.Error()})
@@ -219,6 +301,14 @@ func handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sendSSE(w, flusher, "done", "{}")
+
+	// Persist conversation
+	if sess != nil {
+		sess.mu.Lock()
+		sess.messages = messages
+		sess.lastUsed = time.Now()
+		sess.mu.Unlock()
+	}
 }
 
 // streamClaudeResponse calls Claude streaming API, streams text to frontend,
@@ -242,14 +332,14 @@ func streamClaudeResponse(ctx context.Context, w http.ResponseWriter, flusher ht
 	httpReq.Header.Set("x-api-key", anthropicKey)
 	httpReq.Header.Set("anthropic-version", "2023-06-01")
 
-	resp, err := http.DefaultClient.Do(httpReq)
+	resp, err := httpClient.Do(httpReq)
 	if err != nil {
 		return "", nil, fmt.Errorf("Claude API request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		errBody, _ := io.ReadAll(resp.Body)
+		errBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		return "", nil, fmt.Errorf("Claude API error %d: %s", resp.StatusCode, string(errBody))
 	}
 

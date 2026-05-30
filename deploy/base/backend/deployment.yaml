@@ -29,6 +29,18 @@ spec:
                   key: ANTHROPIC_API_KEY
             - name: MCP_SERVER_URL
               value: "http://kubeassist-mcp:3000"
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
           resources:
             requests:
               cpu: 100m
