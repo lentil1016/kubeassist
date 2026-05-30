@@ -69,16 +69,71 @@ Optional values:
 
 ### Air-gap / Offline Deployment
 
-1. Download the `kubeassist-images-<sha>.zip` artifact from the latest [GitHub Actions run](../../actions).
-2. Transfer to the air-gapped environment and load:
+**Step 1 — Download the image bundle from CI**
+
+On a machine with internet access, download the artifact from the latest successful GitHub Actions run:
+
+```bash
+# Find the latest successful run
+gh run list --repo lentil1016/kubeassist --status success --limit 1
+
+# Download the artifact (replace RUN_ID with the actual run ID)
+gh run download RUN_ID --repo lentil1016/kubeassist --name 'kubeassist-images-*'
+```
+
+This produces a `kubeassist-images.tar.gz` file containing all three images.
+
+**Step 2 — Transfer and load images**
+
+Copy the file to the air-gapped environment, then load:
 
 ```bash
 gunzip kubeassist-images.tar.gz
 docker load -i kubeassist-images.tar
-# Or for containerd: ctr -n k8s.io images import kubeassist-images.tar
+
+# For containerd (e.g. K3s, RKE2):
+# ctr -n k8s.io images import kubeassist-images.tar
 ```
 
-3. Re-tag images to your internal registry and update `image.tag` in Helm values or Kustomize overlay.
+After loading, the following images are available locally (tag matches the git commit SHA from CI):
+
+```
+docker.io/lentil1016/kubeassist-frontend:<sha>
+docker.io/lentil1016/kubeassist-backend:<sha>
+docker.io/lentil1016/kubeassist-mcp:<sha>
+```
+
+**Step 3 — Push to internal registry** (if cluster nodes don't share the local Docker daemon)
+
+```bash
+INTERNAL=your-registry.example.com/kubeassist
+SHA=<sha>   # the git short SHA from the artifact filename
+
+for comp in frontend backend mcp; do
+  docker tag docker.io/lentil1016/kubeassist-${comp}:${SHA} ${INTERNAL}/kubeassist-${comp}:${SHA}
+  docker push ${INTERNAL}/kubeassist-${comp}:${SHA}
+done
+```
+
+**Step 4 — Deploy with Helm**
+
+```bash
+helm install kubeassist deploy/helm/kubeassist/ \
+  --namespace kubeassist --create-namespace \
+  --set anthropicApiKey=sk-ant-... \
+  --set image.registry=your-registry.example.com/kubeassist \
+  --set image.tag=<sha>
+```
+
+**Step 5 — Verify**
+
+```bash
+kubectl -n kubeassist get pods
+# All three pods should be Running
+
+kubectl -n kubeassist port-forward svc/kubeassist-frontend 8888:80
+# Open http://localhost:8888 and send a message
+```
 
 ## Development
 
