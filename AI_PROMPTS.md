@@ -480,3 +480,15 @@
 - `deploy/helm/kubeassist/templates/*.yaml`: 三个 Deployment 添加 liveness/readiness probes
 - `deploy/base/*/deployment.yaml`: Kustomize 清单同步添加 probes
 - 全部测试通过（22 unit + 1 e2e），helm lint 通过
+
+---
+
+## 总结与反思
+
+**AI 擅长什么**: 脚手架生成（从 spec 到可编译项目骨架一步到位）、K8s YAML / Helm 模板的批量生成、table-driven 单元测试的编写、SSE 协议解析等模式化代码、以及运行时 bug 的定位（通过日志分析 + 源码阅读快速收敛，如 mcp-go 类型名变更 2 分钟内定位修复）。
+
+**AI 不擅长什么**: 架构决策需要人来拍板（组件划分、API 设计、安全边界），spec review 的合理性判断（如镜像仓库选择、automountServiceAccountToken 要求）靠人提出，环境特定问题（NO_PROXY 配置、离线集群镜像源、rtk 代理截断）AI 能协助排查但触发线索来自人对环境的了解。第三方库 API 的"记忆"可能过时，需要编译验证纠错。
+
+**Spec-driven 开发方法的效果**: 先写 spec 再实现对 AI 协作效果显著。spec 充当了明确的实现合约——AI 不需要猜测需求，每个 tool 的输入输出 schema、API 格式、RBAC 规则都有据可查，减少了返工。人工 review spec 的成本远低于 review 代码，在最早期就拦截了设计问题。
+
+**数据总结**: 10 个开发阶段 | 15 个 commit | 5 个 MCP tools | 23 个自动化测试（22 unit + 1 e2e）| CI 全绿（test + build + helm-lint）
