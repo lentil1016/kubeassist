@@ -56,8 +56,6 @@
 
 **AI 产出**: 生成了 `docs/spec.md` 技术规格文档，涵盖系统架构、MCP Tools 定义（5 个工具的输入输出 schema）、HTTP API 设计、安全模型、部署方案。
 
-**人工审查**: （spec review 后补充）
-
 ---
 
 ## 阶段二：项目脚手架
@@ -92,8 +90,6 @@
 - 根目录 Makefile（8 个 targets）和 .gitignore
 - 验证通过：两个 Go 模块编译成功，`kubectl kustomize` 渲染正常
 
-**人工审查**: （scaffold review 后补充）
-
 ---
 
 ## 阶段三：端到端链路打通
@@ -127,8 +123,6 @@
 - `frontend/vite.config.ts`: 开发环境 `/api` 反向代理配置
 - 三个组件均编译/构建通过（Go build + TypeScript + Vite production build）
 - 本地验证通过：在 ACP 集群中创建 3 个测试 Pod（Running / CrashLoopBackOff / Pending），通过 `POST /api/chat` 发送"帮我看看 kubeassist-test 命名空间里有没有异常的 pod"，Claude 正确调用 `list_pods` 并生成包含表格、状态标记和排查建议的 Markdown 分析报告，完整 SSE 事件流（145 message + 1 tool_call + 1 tool_result + 1 done）
-
-**人工审查**: （e2e verification 后补充）
 
 ---
 
@@ -166,8 +160,6 @@
   2. `get_events` — Claude 正确过滤 Warning 事件并分析 BackOff + FailedScheduling
   3. `delete_pod` — Claude 遵循安全协议，输出确认提示而未调用 delete_pod tool
 
-**人工审查**: （review 后补充）
-
 ---
 
 ## 阶段五：端到端集成测试
@@ -201,8 +193,6 @@
   - Backend 编排层：重现核心 SSE 解析和 MCP 转发逻辑
   - 验证项：事件顺序、tool_call 内容、tool_result 包含 2 个 pod（Running + CrashLoopBackOff）、响应文本提及 crash-pod
 - 测试通过：0.58s，零外部依赖
-
-**人工审查**: （review 后补充）
 
 ---
 
@@ -244,5 +234,3 @@
   - `backend-deployment.yaml` / `backend-service.yaml`: Backend（含 `anthropicBaseUrl` 条件渲染）
   - `frontend-deployment.yaml` / `frontend-service.yaml`: Frontend（Service type 可配）
 - 验证通过：`helm lint` 无错误，`helm template` 渲染正确，`anthropicApiKey` 必填校验生效，`anthropicBaseUrl` 条件渲染正确
-
-**人工审查**: （review 后补充）
