@@ -54,3 +54,27 @@
 - 本地验证通过：在 ACP 集群中创建 3 个测试 Pod（Running / CrashLoopBackOff / Pending），通过 `POST /api/chat` 发送"帮我看看 kubeassist-test 命名空间里有没有异常的 pod"，Claude 正确调用 `list_pods` 并生成包含表格、状态标记和排查建议的 Markdown 分析报告，完整 SSE 事件流（145 message + 1 tool_call + 1 tool_result + 1 done）
 
 **人工审查**: （e2e verification 后补充）
+
+---
+
+## 阶段四：补全 MCP Tools 与单元测试
+
+**目标**: 实现 spec 中定义的全部 5 个 MCP tools，为 MCP Server 编写单元测试，并强化 delete_pod 的安全约束。
+
+**使用方式**: 以 spec.md 中的 tool schema 为实现合约，要求 Claude 实现 get_pod_detail、get_pod_logs、get_events、delete_pod 四个剩余 tool，并重构代码将 tool handler 与 k8s client 解耦（依赖注入 `kubernetes.Interface`）以支持 fake client 测试。同时更新 Backend 的 system prompt，增加 delete_pod 的安全协议（必须先向用户确认再执行）。
+
+**AI 产出**:
+- `mcp-server/tools.go`: 所有 5 个 tool handler 的完整实现，使用依赖注入模式接受 `kubernetes.Interface`
+  - `get_pod_detail`: 获取 pod 详情 + conditions + container statuses + 关联 events
+  - `get_pod_logs`: 支持 container/tail/previous 参数，含 256KB 截断保护
+  - `get_events`: 支持 namespace + type 过滤
+  - `delete_pod`: 执行删除操作
+- `mcp-server/main.go`: 重构为 `registerTools()` 函数统一注册
+- `mcp-server/tools_test.go`: 22 个 table-driven 单元测试，使用 `k8s.io/client-go/kubernetes/fake`，覆盖所有 5 个 tool 的正常路径、错误路径和边界条件
+- `backend/main.go`: system prompt 增加 delete_pod 安全协议（4 步确认流程）
+- 本地验证通过 3 项测试：
+  1. `get_pod_logs` — Claude 组合调用 `get_pod_detail` + `get_pod_logs(previous: true)` 获取崩溃日志
+  2. `get_events` — Claude 正确过滤 Warning 事件并分析 BackOff + FailedScheduling
+  3. `delete_pod` — Claude 遵循安全协议，输出确认提示而未调用 delete_pod tool
+
+**人工审查**: （review 后补充）

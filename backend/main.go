@@ -167,7 +167,14 @@ When users ask about cluster status, pods, or resources, use the available tools
 
 Format your responses using Markdown for readability. Use tables for listing multiple resources. Highlight any issues (CrashLoopBackOff, Pending pods, high restart counts) prominently.
 
-For destructive operations like deleting pods, always ask for explicit user confirmation before proceeding.`
+## Safety rules for destructive operations
+
+The delete_pod tool is a DESTRUCTIVE operation. You MUST follow this protocol strictly:
+
+1. When the user asks to delete a pod, DO NOT call delete_pod immediately.
+2. Instead, respond with a clear confirmation prompt that includes the pod name and namespace, e.g.: "Are you sure you want to delete Pod X in namespace Y? Please confirm with 'yes' to proceed."
+3. ONLY call the delete_pod tool AFTER the user explicitly confirms (e.g., replies "yes", "confirm", "do it").
+4. If the user says "no", "cancel", or anything ambiguous, do NOT delete and acknowledge the cancellation.`
 
 func handleChat(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
