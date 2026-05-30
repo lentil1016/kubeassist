@@ -114,7 +114,7 @@
 
 **目标**: 实现最小可用的完整链路 — 用户在浏览器对话界面输入自然语言，Backend 调用 Claude API 做 tool calling，通过 MCP Server 查询 K8s 集群，将结果流式返回前端展示。
 
-**使用方式**: 以 spec.md 为实现合约，要求 Claude 按照 MCP Server → Backend → Frontend 的顺序实现三个组件。MCP Server 使用 mcp-go 库实现 Streamable HTTP transport，仅实现 `list_pods` 一个 tool；Backend 使用 Claude Messages API 的原生 HTTP 流式调用 + mcp-go client 转发 tool call；Frontend 使用 React + react-markdown 实现对话 UI，通过 SSE 流式接收响应。开发过程中遇到 mcp-go v0.54.1 的 API 变更（`InitializeParams` / `CallToolParams` 等类型名变化），通过阅读源码修复。
+**使用方式**: 以 spec.md 为实现合约，要求 Claude 按照 MCP Server → Backend → Frontend 的顺序实现三个组件。MCP Server 使用 mcp-go 库实现 Streamable HTTP transport，仅实现 `list_pods` 一个 tool；Backend 使用 Claude Messages API 的原生 HTTP 流式调用 + mcp-go client 转发 tool call；Frontend 使用 React + react-markdown 实现对话 UI，通过 SSE 流式接收响应。
 
 **AI 产出**:
 - `mcp-server/main.go`: 完整 MCP Server 实现 — K8s client 初始化（支持 in-cluster 和 kubeconfig 回退）、`list_pods` tool 注册与处理（含 namespace/status 过滤、pod 状态解析、容器 ready/restart 统计）、Streamable HTTP transport 启动
@@ -123,6 +123,39 @@
 - `frontend/vite.config.ts`: 开发环境 `/api` 反向代理配置
 - 三个组件均编译/构建通过（Go build + TypeScript + Vite production build）
 - 本地验证通过：在 ACP 集群中创建 3 个测试 Pod（Running / CrashLoopBackOff / Pending），通过 `POST /api/chat` 发送"帮我看看 kubeassist-test 命名空间里有没有异常的 pod"，Claude 正确调用 `list_pods` 并生成包含表格、状态标记和排查建议的 Markdown 分析报告，完整 SSE 事件流（145 message + 1 tool_call + 1 tool_result + 1 done）
+
+**遇到的 Bug 与调试过程**:
+
+1. **mcp-go v0.54.1 API 类型名变更（编译错误）**
+   - **现象**: Backend 代码使用 `mcp.InitializeRequestParams` 和 `mcp.CallToolRequestParams` 编译失败，报 `undefined` 错误。
+   - **定位**: AI 最初按照 mcp-go 早期版本的 API 编写代码。编译失败后，AI 直接读取了本地 Go module cache 中 mcp-go v0.54.1 的源码（`grep -n 'type Initialize' ... /mcp/types.go`），发现类型已重命名为 `InitializeParams` 和 `CallToolParams`。
+   - **修复**: 将所有引用从 `InitializeRequestParams` → `InitializeParams`、`CallToolRequestParams` → `CallToolParams`，一次修改后编译通过。
+   - **反思**: AI 对第三方库 API 的"记忆"可能过时，但能通过直接阅读源码快速自我纠正。
+
+2. **mcp-go CallToolRequest.Arguments 类型不匹配（编译错误）**
+   - **现象**: `request.Params.Arguments["namespace"]` 编译失败，报 `cannot index variable of interface type any`。
+   - **定位**: AI 读取 mcp-go 源码发现 `Arguments` 字段类型是 `any`（不是 `map[string]any`），但 `CallToolRequest` 提供了 `GetString(key, default)` 等类型安全的 accessor 方法。
+   - **修复**: 将 `request.Params.Arguments["namespace"].(string)` 改为 `request.GetString("namespace", "")`，编译通过。
+
+3. **Go slice 值传递导致 tool_use 循环失效（逻辑 Bug）**
+   - **现象**: `streamClaudeResponse` 函数内部通过 `append` 向 `messages` 追加 assistant 消息和 tool_result，但调用方的 `messages` 变量没有更新，导致第二轮 Claude 调用缺少上下文。
+   - **定位**: AI 在编写代码时就意识到了这个问题——Go 中 slice 是值传递，`append` 可能分配新的底层数组，调用方看不到新增的元素。
+   - **修复**: 将函数签名从 `func streamClaudeResponse(..., messages []claudeMessage) (string, error)` 改为 `... (string, []claudeMessage, error)`，返回更新后的 slice，调用方用 `messages = updatedMessages` 接收。
+
+4. **K8s API 返回 Forbidden（运行时错误）**
+   - **现象**: `kubectl get nodes` 返回 `Unable to connect to the server: Forbidden`，MCP Server 无法连接集群。
+   - **定位**: AI 先检查了 kubeconfig（`kubectl config view --minify`），发现集群地址是 `https://192.168.141.35/kubernetes/global`（ACP 平台），token 有效。然后用 `curl -sk` 直接调用 API 成功，说明 kubectl 走了代理。检查环境变量发现 `http_proxy` 已设置但 `no_proxy` 为空，192.168.141.35 的请求被发往代理服务器。
+   - **修复**: 设置 `NO_PROXY=192.168.141.35`，kubectl 和 MCP Server 均恢复正常。
+
+5. **air-gapped 集群无法拉取 Docker Hub 镜像（运行时错误）**
+   - **现象**: 创建测试 Pod 使用 `nginx:1.25` 和 `busybox` 镜像，Pod 状态为 `ImagePullBackOff` / `ErrImagePull`。
+   - **定位**: AI 判断这是离线集群无法访问 Docker Hub。通过 `kubectl get pods -A -o jsonpath` 扫描集群中已有 Pod 使用的镜像，找到了集群内部 registry 中可用的 `registry.alauda.cn:60070/ops/busybox:stable`。
+   - **修复**: 改用集群内已有的 busybox 镜像创建测试 Pod，三个 Pod 均正常创建（Running / CrashLoopBackOff / Pending）。
+
+6. **SSE 流被 rtk proxy 截断（运行时错误）**
+   - **现象**: curl 测试 `/api/chat` 返回的 SSE 流只有 10 个 `message` 事件，没有 `tool_call`、`tool_result` 和 `done` 事件。Backend 日志显示完整的 Claude 交互和 MCP tool 调用都成功完成。
+   - **定位**: AI 在 Backend 中添加了 `[Claude SSE]` 日志，确认了后端流程完整（tool_use → MCP call → 第二轮 Claude → end_turn）。然后注意到 curl 输出末尾有 `... (407 more lines, 7131 bytes total)` 的截断标记——这是开发环境中的 rtk（token 优化代理）在过滤长输出。
+   - **修复**: 改用 `/usr/bin/curl`（绕过 rtk hook）直接调用，获取到完整的 SSE 流（148 个事件：145 message + 1 tool_call + 1 tool_result + 1 done）。
 
 ---
 
