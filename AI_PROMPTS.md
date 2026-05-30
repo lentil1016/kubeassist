@@ -78,3 +78,22 @@
   3. `delete_pod` — Claude 遵循安全协议，输出确认提示而未调用 delete_pod tool
 
 **人工审查**: （review 后补充）
+
+---
+
+## 阶段五：端到端集成测试
+
+**目标**: 添加自动化 e2e 测试，验证从 HTTP 请求到 SSE 响应的完整链路，使用 mock Claude API 和 fake K8s client 实现零外部依赖。
+
+**使用方式**: 向 Claude 描述测试思路（mock Claude 返回固定的 tool_use 响应、MCP Server 使用 fake clientset、Backend 完整编排逻辑），要求生成 Gherkin feature 文件作为可读规格，Go 测试代码验证 SSE 事件序列。开发中发现 mcp-go 的 `StreamableHTTPServer` 实现了 `http.Handler` 接口，因此可以直接用 `httptest.NewServer` 启动，避免了端口管理和进程启动的复杂性。
+
+**AI 产出**:
+- `test/chat.feature`: Gherkin 场景描述 — 用户问"有没有异常的 pod"，验证 SSE 事件序列（tool_call → tool_result → message → done）和数据内容
+- `test/e2e_test.go`: 全在进程内的 e2e 测试，三个组件均使用 `httptest.Server`：
+  - Mock Claude API：根据请求是否包含 `tool_result` 返回 tool_use 或文本响应
+  - 真实 MCP Server：mcp-go + fake k8s client，注册 `list_pods` tool
+  - Backend 编排层：重现核心 SSE 解析和 MCP 转发逻辑
+  - 验证项：事件顺序、tool_call 内容、tool_result 包含 2 个 pod（Running + CrashLoopBackOff）、响应文本提及 crash-pod
+- 测试通过：0.58s，零外部依赖
+
+**人工审查**: （review 后补充）
