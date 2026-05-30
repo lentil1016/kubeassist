@@ -234,9 +234,15 @@ POST /api/chat
 Content-Type: application/json
 
 {
-  "message": "Show me all pods in the kube-system namespace that are not running"
+  "message": "Show me all pods in the kube-system namespace that are not running",
+  "conversation_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
+
+| Field             | Type   | Required | Description                                                        |
+|-------------------|--------|----------|--------------------------------------------------------------------|
+| `message`         | string | Yes      | User's natural language message.                                   |
+| `conversation_id` | string | No       | UUID identifying the conversation. Enables multi-turn context. If omitted, the request is stateless. |
 
 **Response:**
 
@@ -343,6 +349,7 @@ A Helm chart is provided at `deploy/helm/kubeassist/` with the following configu
 |-------|----------|---------|-------------|
 | `anthropicApiKey` | Yes | — | Claude API key |
 | `anthropicBaseUrl` | No | `""` (official API) | Custom Claude API base URL |
+| `image.registry` | No | `docker.io/lentil1016` | Image registry prefix (override for air-gap / mirror) |
 | `image.tag` | No | `latest` | Image tag for all three components |
 | `frontend.service.type` | No | `ClusterIP` | Frontend Service type |
 

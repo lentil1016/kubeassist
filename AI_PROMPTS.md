@@ -491,4 +491,4 @@
 
 **Spec-driven 开发方法的效果**: 先写 spec 再实现对 AI 协作效果显著。spec 充当了明确的实现合约——AI 不需要猜测需求，每个 tool 的输入输出 schema、API 格式、RBAC 规则都有据可查，减少了返工。人工 review spec 的成本远低于 review 代码，在最早期就拦截了设计问题。
 
-**数据总结**: 10 个开发阶段 | 15 个 commit | 5 个 MCP tools | 23 个自动化测试（22 unit + 1 e2e）| CI 全绿（test + build + helm-lint）
+**数据总结**: 10 个开发阶段 | 18 个 commit | 5 个 MCP tools | 23 个自动化测试（22 unit + 1 e2e）| CI 全绿（test + build + helm-lint）
